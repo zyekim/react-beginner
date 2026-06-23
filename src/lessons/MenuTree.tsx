@@ -3,7 +3,7 @@
 // 3. 전체선택
 // 4. 펼치기 접기
 // 5. 수정, 취소, 저장 기능
-import {useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {sampleMenu} from "../data/sampleMenu";
 import type {MenuItem, PermissionType} from "../types/menu";
 
@@ -12,17 +12,24 @@ type CheckStateType = "unchecked" | "checked" | "indeterminate";
 function TriCheckbox({
   state,
   disabled,
-  toggleNode,
+  onToggle,
 }: {
   state: CheckStateType;
   disabled: boolean;
-  toggleNode: (next: boolean) => void;
+  onToggle: (next: boolean) => void;
 }) {
+  const checkRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (checkRef.current) {
+      checkRef.current.indeterminate = state == "indeterminate";
+    }
+  }, [state]);
   return (
     <input
+      ref={checkRef}
       type="checkbox"
       checked={state == "checked"}
-      onChange={(e) => toggleNode(e.target.checked)}
+      onChange={() => onToggle(state != "checked")}
       disabled={disabled}
     />
   );
@@ -52,20 +59,25 @@ function MenuRow({
   const hasChildren = item.children && item.children.length > 0;
   return (
     <>
-      <tr key={item.id} style={{paddingLeft: depth * 16}}>
-        <td>{item.menuName}</td>
+      <tr className={isEdit && (item.view || item.auth) ? "active" : ""}>
+        <td
+          style={{paddingLeft: depth * 16, fontWeight: depth == 0 ? 700 : 400}}
+          className="menu-name"
+        >
+          {item.menuName}
+        </td>
         <td align="center">
           <TriCheckbox
             disabled={!isEdit}
             state={getCheckState(item, "view")}
-            toggleNode={(nextValue) => onToggle(item.id, "view", nextValue)}
+            onToggle={(nextValue) => onToggle(item.id, "view", nextValue)}
           />
         </td>
         <td align="center">
           <TriCheckbox
             disabled={!isEdit}
             state={getCheckState(item, "auth")}
-            toggleNode={(nextValue) => onToggle(item.id, "auth", nextValue)}
+            onToggle={(nextValue) => onToggle(item.id, "auth", nextValue)}
           />
         </td>
       </tr>
@@ -90,43 +102,42 @@ export default function MenuTree() {
   const [isEdit, setIsEdit] = useState<boolean>(false);
   const [backup, setBackup] = useState<MenuItem[] | null>(null);
 
+  function setAll(item: MenuItem, type: PermissionType, nextValue: boolean) {
+    return {
+      ...item,
+      [type]: nextValue,
+      children: item.children?.map((c) => setAll(c, type, nextValue)),
+    };
+  }
   const onToggleAll = (type: PermissionType, nextValue: boolean) => {
-    setTree((prev) => {
-      return prev.map((item) => {
-        return {
-          ...item,
-          [type]: nextValue,
-        };
-      });
-    });
+    setTree((prev) => prev.map((item) => setAll(item, type, nextValue)));
   };
 
-  const onToggle = (id: string, type: PermissionType, nextValue: boolean) => {
-    setTree((prev) => {
-      return prev.map((i) => {
-        if (i.id === id) {
-          return {
-            ...i,
-            [type]: nextValue,
-          };
-        }
-        if (i.children) {
-          return {
-            ...i,
-            children: i.children.map((c) => {
-              if (c.id === id) {
-                return {
-                  ...c,
-                  [type]: nextValue,
-                };
-              }
-              return c;
-            }),
-          };
-        }
-        return i;
-      });
+  function toggleNode(
+    list: MenuItem[],
+    id: string,
+    type: PermissionType,
+    nextValue: boolean,
+  ): MenuItem[] {
+    return list.map((i) => {
+      if (i.id === id) {
+        return setAll(i, type, nextValue);
+      }
+      if (i.children) {
+        const children = toggleNode(i.children, id, type, nextValue);
+        const newState = getCheckState({...i, children}, type);
+        return {
+          ...i,
+          children,
+          [type]: newState === "checked",
+        };
+      }
+      return i;
     });
+  }
+
+  const onToggle = (id: string, type: PermissionType, nextValue: boolean) => {
+    setTree((prev) => toggleNode(prev, id, type, nextValue));
   };
 
   const allView = tree.every((i) => getCheckState(i, "view") === "checked");
@@ -198,7 +209,7 @@ export default function MenuTree() {
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="menu-tree">
           {tree.map((item) => (
             <MenuRow
               key={item.id}
